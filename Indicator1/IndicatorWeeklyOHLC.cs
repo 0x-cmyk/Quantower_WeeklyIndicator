@@ -360,7 +360,7 @@ public class IndicatorDailyOHLC : Indicator
 
         var currentBarTime = this.Time();
         var inSession = this.currentSession.ContainsDate(currentBarTime);
-        double currentClose = this.HistoricalData.Close(Count - 1);
+        double currentClose = this.HistoricalData.Close(0);
 
         // Main range
         if (inSession)
@@ -405,21 +405,20 @@ public class IndicatorDailyOHLC : Indicator
         if (this.rangeCache.Count > this.PreviousDataOffset) {
             var range = this.rangeCache[this.PreviousDataOffset];
             DateTime currentCloseTime = this.HistoricalData.Time(0);
-            string alertId = $"{currentCloseTime}_{range.StartDateTime.Date}";
+            string highAlertId = $"{currentCloseTime.Date}_{range.StartDateTime.Date}_high";
+            string lowAlertId = $"{currentCloseTime.Date}_{range.StartDateTime.Date}_low";
 
-            //SendTelegramAlert($"id={alertId}, Price captured on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)} for {TimeZoneInfo.ConvertTimeFromUtc(range.StartDateTime, TimeZoneInfo.Local)}", alertId);
-
-            if (!sentAlerts.Contains(alertId) && range.StartDateTime.Date <= GetWeekStart(currentCloseTime).AddDays(-7 * this.PreviousDataOffset) && range.StartDateTime.Date >= GetWeekStart(currentCloseTime).AddDays(-7 * (this.PreviousDataOffset + 1)))
+            if (range.StartDateTime.Date <= GetWeekStart(currentCloseTime).AddDays(-7 * this.PreviousDataOffset) && range.StartDateTime.Date >= GetWeekStart(currentCloseTime).AddDays(-7 * (this.PreviousDataOffset + 1)))
             {
-                if (currentClose > range.High)
+                if (!sentAlerts.Contains(highAlertId) && currentClose > range.High)
                 {
-                    SendTelegramAlert($"Price closed ABOVE previous weekly HIGH ({range.High}) on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)}", alertId);
-                    sentAlerts.Add(alertId);
+                    SendTelegramAlert($"Price closed ABOVE previous weekly HIGH ({range.High}) on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)}", highAlertId);
+                    sentAlerts.Add(highAlertId);
                 }
-                else if (currentClose < range.Low)
+                if (!sentAlerts.Contains(lowAlertId) && currentClose < range.Low)
                 {
-                    SendTelegramAlert($"Price closed BELOW previous weekly LOW ({range.Low}) on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)}", alertId);
-                    sentAlerts.Add(alertId);
+                    SendTelegramAlert($"Price closed BELOW previous weekly LOW ({range.Low}) on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)}", lowAlertId);
+                    sentAlerts.Add(lowAlertId);
                 }
             }
             // ====================== telegram alert ========================
