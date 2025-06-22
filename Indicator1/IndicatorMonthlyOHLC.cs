@@ -11,11 +11,11 @@ using TradingPlatform.BusinessLayer.Utils;
 
 namespace CustomIndicators;
 
-public class IndicatorWeeklyOHLC : Indicator
+public class IndicatorMonthlyOHLC : Indicator
 {
     #region Parameters   
 
-    public WeeklyOHLCSessionType WeeklySessionType = WeeklyOHLCSessionType.AllWeek;
+    public MonthlyOHLCSessionType MonthlySeesionType = MonthlyOHLCSessionType.AllMonth;
     public string CustomSessionName = string.Empty;
     private HashSet<string> sentAlerts;
     public DateTime CustomRangeStartTime
@@ -44,10 +44,10 @@ public class IndicatorWeeklyOHLC : Indicator
         set => this.customRangeEndTime = value;
     }
     private DateTime customRangeEndTime;
-    public int WeeksCount = 10;
+    public int MonthsCount = 10;
     public int PreviousDataOffset = 0;
     public bool UseExtendLines = false;
-    public bool AllowToDrawExtendLines => this.UseExtendLines && this.WeeklySessionType != WeeklyOHLCSessionType.AllWeek;
+    public bool AllowToDrawExtendLines => this.UseExtendLines && this.MonthlySeesionType != MonthlyOHLCSessionType.AllMonth;
     public DateTime ExtendRangeStartTime
     {
         get
@@ -198,11 +198,11 @@ public class IndicatorWeeklyOHLC : Indicator
     private Pen middleExtendLinePen;
     public bool ShowMiddleLineLabel { get; private set; }
     public Font CurrentFont { get; private set; }
-    public string OpenCustomText = "O: ", HighCustomText = "High of Week: ", LowCustomText = "Low of Week: ", CloseCustomText = "C: ", MiddleCustomText = "Middle of Week: ";
+    public string OpenCustomText = "O: ", HighCustomText = "High of Month: ", LowCustomText = "Low of Month: ", CloseCustomText = "C: ", MiddleCustomText = "Middle of Month: ";
 
-    private readonly IList<WeeklyRangeItem> rangeCache;
+    private readonly IList<MonthlyRangeItem> rangeCache;
 
-    private WeeklyRangeItem currentRange;
+    private MonthlyRangeItem currentRange;
     private ISession currentSession;
     private ISession extendSession;
     private ISessionsContainer chartSessionContainer;
@@ -212,9 +212,9 @@ public class IndicatorWeeklyOHLC : Indicator
 
     #endregion Parameters
 
-    public IndicatorWeeklyOHLC()
+    public IndicatorMonthlyOHLC()
     {
-        this.Name = "Weekly OHLC";
+        this.Name = "Monthly OHLC";
 
         this.AllowFitAuto = true;
         this.SeparateWindow = false;
@@ -222,7 +222,7 @@ public class IndicatorWeeklyOHLC : Indicator
         this.ShowLabel = true;
         this.labelFormat = 1;
         this.labelPosition = 1;
-        this.rangeCache = new List<WeeklyRangeItem>();
+        this.rangeCache = new List<MonthlyRangeItem>();
 
         this.OpenLineOptions = new LineOptions()
         {
@@ -332,12 +332,12 @@ public class IndicatorWeeklyOHLC : Indicator
         if (this.CurrentChart != null)
             this.CurrentChart.SettingsChanged += this.CurrentChartOnSettingsChanged;
 
-        if (this.WeeklySessionType == WeeklyOHLCSessionType.AllWeek)
+        if (this.MonthlySeesionType == MonthlyOHLCSessionType.AllMonth)
         {
             // default session
             this.currentSession = this.CreateDefaultSession();
         }
-        else if (this.WeeklySessionType == WeeklyOHLCSessionType.SpecifiedSession)
+        else if (this.MonthlySeesionType == MonthlyOHLCSessionType.SpecifiedSession)
         {
             if (!string.IsNullOrEmpty(this.CustomSessionName))
             {
@@ -347,7 +347,7 @@ public class IndicatorWeeklyOHLC : Indicator
                     this.currentSession = sessions.FirstOrDefault(s => s.Name.Equals(this.CustomSessionName) && s.Type == SessionType.Main);
             }
         }
-        else if (this.WeeklySessionType == WeeklyOHLCSessionType.CustomRange)
+        else if (this.MonthlySeesionType == MonthlyOHLCSessionType.CustomRange)
             this.currentSession = new Session("Custom session", this.CustomRangeStartTime.TimeOfDay, this.CustomRangeEndTime.TimeOfDay);
 
         if (this.UseExtendLines)
@@ -365,21 +365,21 @@ public class IndicatorWeeklyOHLC : Indicator
         // Main range
         if (inSession)
         {
-            var currentWeekTime = GetWeekStart(currentBarTime);
+            var currentMonthTime = currentBarTime.Date.AddDays(-currentBarTime.Day);
             // create new 'main' range
-            if (this.currentRange == null || currentWeekTime >= this.currentSessionCloseDateTime)
+            if (this.currentRange == null || currentMonthTime >= this.currentSessionCloseDateTime)
             {
-                this.currentSessionOpenDateTime = currentWeekTime.AddTicks(this.currentSession.OpenTime.Ticks);
+                this.currentSessionOpenDateTime = currentMonthTime.AddTicks(this.currentSession.OpenTime.Ticks);
                 this.currentSessionCloseDateTime = currentBarTime.Date.AddTicks(this.currentSession.CloseTime.Ticks);
 
                 if (currentBarTime < this.currentSessionOpenDateTime)
-                    this.currentSessionOpenDateTime = this.currentSessionOpenDateTime.AddDays(-7);
+                    this.currentSessionOpenDateTime = this.currentSessionOpenDateTime.AddMonths(-1);
                 if (currentBarTime > this.currentSessionCloseDateTime)
-                    this.currentSessionCloseDateTime = this.currentSessionOpenDateTime.AddDays(7);
+                    this.currentSessionCloseDateTime = this.currentSessionOpenDateTime.AddMonths(1);
 
                 if (this.currentRange != null)
                     this.currentRange.EndDateTime = currentBarTime;
-                this.rangeCache.Insert(0, this.currentRange = new WeeklyRangeItem(currentWeekTime, this.Open()));
+                this.rangeCache.Insert(0, this.currentRange = new MonthlyRangeItem(currentBarTime, this.Open()));
             }
 
             // update High/Low/Close in history
@@ -399,7 +399,7 @@ public class IndicatorWeeklyOHLC : Indicator
                 this.currentRange.ExtendEndDateTime = this.currentRange.EndDateTime.Date.AddTicks(this.extendSession.CloseTime.Ticks);
 
                 if (this.extendSession.OpenTime > this.extendSession.CloseTime)
-                    this.currentRange.ExtendEndDateTime = this.currentRange.ExtendEndDateTime.AddDays(7);
+                    this.currentRange.ExtendEndDateTime = this.currentRange.ExtendEndDateTime.AddMonths(1);
             }
         }
 
@@ -410,16 +410,16 @@ public class IndicatorWeeklyOHLC : Indicator
             string highAlertId = $"{currentCloseTime.Date}_{range.StartDateTime.Date}_high";
             string lowAlertId = $"{currentCloseTime.Date}_{range.StartDateTime.Date}_low";
 
-            if (range.StartDateTime.Date <= GetWeekStart(currentCloseTime).AddDays(-7 * this.PreviousDataOffset) && range.EndDateTime.Date >= GetWeekStart(currentCloseTime).AddDays(-7 * this.PreviousDataOffset))
+            if (range.StartDateTime.Date <= currentCloseTime.AddMonths(-(this.PreviousDataOffset + 1)) && range.EndDateTime.Date >= currentCloseTime.AddMonths(-1 * (this.PreviousDataOffset + 1)))
             {
                 if (!sentAlerts.Contains(highAlertId) && currentClose > range.High)
                 {
-                    SendTelegramAlert($"Price closed ABOVE previous weekly HIGH ({range.High}) on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)}", highAlertId);
+                    SendTelegramAlert($"Price closed ABOVE previous monthly HIGH ({range.High}) on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)}", highAlertId);
                     sentAlerts.Add(highAlertId);
                 }
                 if (!sentAlerts.Contains(lowAlertId) && currentClose < range.Low)
                 {
-                    SendTelegramAlert($"Price closed BELOW previous weekly LOW ({range.Low}) on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)}", lowAlertId);
+                    SendTelegramAlert($"Price closed BELOW previous monthly LOW ({range.Low}) on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)}", lowAlertId);
                     sentAlerts.Add(lowAlertId);
                 }
             }
@@ -451,9 +451,9 @@ public class IndicatorWeeklyOHLC : Indicator
         {
             var settings = base.Settings;
 
-            var allWeek = new SelectItem("All Week", WeeklyOHLCSessionType.AllWeek);
-            var specifiedSession = new SelectItem("Specified session", WeeklyOHLCSessionType.SpecifiedSession);
-            var customRange = new SelectItem("Custom range", WeeklyOHLCSessionType.CustomRange);
+            var AllMonth = new SelectItem("All Month", MonthlyOHLCSessionType.AllMonth);
+            var specifiedSession = new SelectItem("Specified session", MonthlyOHLCSessionType.SpecifiedSession);
+            var customRange = new SelectItem("Custom range", MonthlyOHLCSessionType.CustomRange);
 
             var belowTL = new SelectItem("Below the line", 0);
             var aboveTL = new SelectItem("Above the line", 1);
@@ -465,9 +465,9 @@ public class IndicatorWeeklyOHLC : Indicator
             //
             var defaultSeparator = settings.FirstOrDefault()?.SeparatorGroup;
 
-            settings.Add(new SettingItemSelectorLocalized("Session type", new SelectItem("Session type", this.WeeklySessionType), new List<SelectItem>
+            settings.Add(new SettingItemSelectorLocalized("Session type", new SelectItem("Session type", this.MonthlySeesionType), new List<SelectItem>
                              {
-                                 allWeek,
+                                 AllMonth,
                                  specifiedSession,
                                  customRange
                              })
@@ -499,17 +499,17 @@ public class IndicatorWeeklyOHLC : Indicator
                 ValueChangingBehavior = SettingItemValueChangingBehavior.WithConfirmation,
                 Relation = new SettingItemRelationVisibility("Session type", customRange)
             });
-            settings.Add(new SettingItemInteger("Numbers of weeks to calculate", this.WeeksCount, 20)
+            settings.Add(new SettingItemInteger("Numbers of months to calculate", this.MonthsCount, 20)
             {
                 SeparatorGroup = defaultSeparator,
-                Text = loc._("Numbers of weeks to calculate"),
-                Relation = new SettingItemRelationVisibility("Session type", allWeek, specifiedSession, customRange)
+                Text = loc._("Numbers of months to calculate"),
+                Relation = new SettingItemRelationVisibility("Session type", AllMonth, specifiedSession, customRange)
             });
-            settings.Add(new SettingItemInteger("Use previous data (offset in weeks)", this.PreviousDataOffset, 20)
+            settings.Add(new SettingItemInteger("Use previous data (offset in months)", this.PreviousDataOffset, 20)
             {
                 SeparatorGroup = defaultSeparator,
-                Text = loc._("Use previous data (offset in weeks)"),
-                Relation = new SettingItemRelationVisibility("Session type", allWeek, specifiedSession, customRange)
+                Text = loc._("Use previous data (offset in months)"),
+                Relation = new SettingItemRelationVisibility("Session type", AllMonth, specifiedSession, customRange)
             });
             settings.Add(new SettingItemBoolean("Show extend lines", this.UseExtendLines, 40)
             {
@@ -768,9 +768,9 @@ public class IndicatorWeeklyOHLC : Indicator
                 this.MiddleCustomText = middleCustomText;
 
             var needRefresh = false;
-            if (holder.TryGetValue("Session type", out item) && item.GetValue<WeeklyOHLCSessionType>() != this.WeeklySessionType)
+            if (holder.TryGetValue("Session type", out item) && item.GetValue<MonthlyOHLCSessionType>() != this.MonthlySeesionType)
             {
-                this.WeeklySessionType = item.GetValue<WeeklyOHLCSessionType>();
+                this.MonthlySeesionType = item.GetValue<MonthlyOHLCSessionType>();
                 needRefresh |= item.ValueChangingReason == SettingItemValueChangingReason.Manually;
             }
             if (holder.TryGetValue("Custom session name", out item) && item.Value is string customSessionName)
@@ -785,9 +785,9 @@ public class IndicatorWeeklyOHLC : Indicator
                 this.customRangeEndTime = dtEndTime;
                 needRefresh |= item.ValueChangingReason == SettingItemValueChangingReason.Manually;
             }
-            if (holder.TryGetValue("Numbers of weeks to calculate", out item) && item.Value is int WeeksCount)
-                this.WeeksCount = WeeksCount;
-            if (holder.TryGetValue("Use previous data (offset in weeks)", out item) && item.Value is int previousDataOffset)
+            if (holder.TryGetValue("Numbers of months to calculate", out item) && item.Value is int MonthsCount)
+                this.MonthsCount = MonthsCount;
+            if (holder.TryGetValue("Use previous data (offset in months)", out item) && item.Value is int previousDataOffset)
                 this.PreviousDataOffset = previousDataOffset;
             if (holder.TryGetValue("Show extend lines", out item) && item.Value is bool useExtendLines)
                 this.UseExtendLines = useExtendLines;
@@ -832,7 +832,7 @@ public class IndicatorWeeklyOHLC : Indicator
             var rightTime = currentWindow.CoordinatesConverter.GetTime(args.Rectangle.Right);
 
             int halfBarWidth = this.CurrentChart.BarsWidth / 2;
-            for (int i = 0; i < this.WeeksCount; i++)
+            for (int i = 0; i < this.MonthsCount; i++)
             {
                 if (i >= this.rangeCache.Count)
                     break;
@@ -996,7 +996,7 @@ public class IndicatorWeeklyOHLC : Indicator
         var hasMinPrice = false;
         var hasMaxPrice = false;
 
-        for (int i = 0; i < this.WeeksCount; i++)
+        for (int i = 0; i < this.MonthsCount; i++)
         {
             if (i >= this.rangeCache.Count)
                 break;
@@ -1031,7 +1031,7 @@ public class IndicatorWeeklyOHLC : Indicator
 
     private void CurrentChartOnSettingsChanged(object sender, ChartEventArgs e)
     {
-        if (this.WeeklySessionType == WeeklyOHLCSessionType.SpecifiedSession)
+        if (this.MonthlySeesionType == MonthlyOHLCSessionType.SpecifiedSession)
         {
             if (this.CurrentChart?.CurrentSessionContainer == null || this.chartSessionContainer == null)
                 return;
@@ -1081,7 +1081,8 @@ public class IndicatorWeeklyOHLC : Indicator
     private Session CreateDefaultSession()
     {
         // 00:00
-        var startTime = GetWeekStart(new DateTime(Core.Instance.TimeUtils.DateTimeUtcNow.Date.Ticks, DateTimeKind.Local));
+        var startTime = new DateTime(Core.Instance.TimeUtils.DateTimeUtcNow.Date.Ticks, DateTimeKind.Local).Date;
+        startTime = startTime.AddDays(-startTime.Day);
         // 23:59:59
         var endTime = new DateTime(Core.Instance.TimeUtils.DateTimeUtcNow.Date.AddHours(23).AddMinutes(59).AddSeconds(59).Ticks, DateTimeKind.Local);
 
@@ -1171,18 +1172,11 @@ public class IndicatorWeeklyOHLC : Indicator
             //this.("TGError", "Telegram error: " + ex.Message, index: this.HistoricalData.Count - 1, y: 0, color: Color.Red);
         }
     }
-
-    private DateTime GetWeekStart(DateTime dt)
-    {
-        // Return start of ISO week (Monday)
-        int diff = (7 + (dt.DayOfWeek - DayOfWeek.Monday)) % 7;
-        return dt.Date.AddDays(-diff);
-    }
 }
 
 #region Nested
 
-internal class WeeklyRangeItem
+internal class MonthlyRangeItem
 {
     public double High { get; private set; }
     public double Low { get; private set; }
@@ -1195,7 +1189,7 @@ internal class WeeklyRangeItem
     public DateTime ExtendStartDateTime { get; internal set; }
     public DateTime ExtendEndDateTime { get; internal set; }
 
-    public WeeklyRangeItem(DateTime startDateTime, double openPrice)
+    public MonthlyRangeItem(DateTime startDateTime, double openPrice)
     {
         this.StartDateTime = startDateTime;
         this.Open = openPrice;
@@ -1203,7 +1197,6 @@ internal class WeeklyRangeItem
         this.High = double.MinValue;
         this.Low = double.MaxValue;
     }
-
     public bool TryUpdate(double high, double low, double close)
     {
         bool updated = false;
@@ -1253,6 +1246,6 @@ internal class WeeklyRangeItem
     }
 }
 
-public enum WeeklyOHLCSessionType { AllWeek, SpecifiedSession, CustomRange, }
+public enum MonthlyOHLCSessionType { AllMonth, SpecifiedSession, CustomRange }
 
 #endregion Nested
