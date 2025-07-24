@@ -5,21 +5,19 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 using TradingPlatform.BusinessLayer;
 using TradingPlatform.BusinessLayer.Chart;
 using TradingPlatform.BusinessLayer.Utils;
 
 namespace CustomIndicators;
 
-public class IndicatorCountryOHLC1 : Indicator
+public class IndicatorCountryOHLC15 : Indicator
 {
     #region Parameters   
 
     private HashSet<string> sentAlerts;
     private HistoricalData mainHistoricalData;
-    private Indicator mainIndicator;
-    private DateTime lastGetHistory;
+    private DateTime startOfHistory;
     public DateTime LondonRangeStartTime
     {
         get
@@ -117,7 +115,7 @@ public class IndicatorCountryOHLC1 : Indicator
     public int labelFormat { get; set; }
     public int labelPosition { get; set; }
     public bool ShowLabel { get; private set; }
-    public int AlertOnce { get; private set; }
+    public bool AlertOnce { get; private set; }
 
     public LineOptions LondonHighLineOptions
     {
@@ -289,15 +287,15 @@ public class IndicatorCountryOHLC1 : Indicator
 
     #endregion Parameters
 
-    public IndicatorCountryOHLC1()
+    public IndicatorCountryOHLC15()
     {
-        this.Name = "Country OHLC";
+        this.Name = "Country OHLC (15 mins)";
 
         this.AllowFitAuto = true;
         this.SeparateWindow = false;
         this.LabelAlignment = NativeAlignment.Right;
         this.ShowLabel = true;
-        this.AlertOnce = 1;
+        this.AlertOnce = true;
         this.labelFormat = 1;
         this.labelPosition = 1;
         this.londonRangeCache = new List<CountryRangeItem>();
@@ -426,10 +424,8 @@ public class IndicatorCountryOHLC1 : Indicator
 
     protected override void OnInit()
     {
-        this.mainIndicator = Core.Indicators.BuiltIn.SMA(10, PriceType.Close);
-        this.lastGetHistory = Core.TimeUtils.DateTimeUtcNow;
-        this.mainHistoricalData = this.Symbol.GetHistory(Period.MIN15, HistoryType.Bid, this.lastGetHistory.AddHours(-1));
-        this.mainHistoricalData.AddIndicator(this.mainIndicator);
+        this.startOfHistory = Core.TimeUtils.DateTimeUtcNow.AddDays(-1);
+        this.mainHistoricalData = this.Symbol.GetHistory(Period.MIN15, this.startOfHistory);
 
         this.sentAlerts = new HashSet<string>();
         this.chartSessionContainer = this.CurrentChart?.CurrentSessionContainer;
@@ -440,6 +436,13 @@ public class IndicatorCountryOHLC1 : Indicator
     }
     protected override void OnUpdate(UpdateArgs args)
     {
+        var startTime = this.Time(this.Count - 1);
+        if(startTime != startOfHistory)
+        {
+            this.startOfHistory = startTime;
+            this.mainHistoricalData = this.Symbol.GetHistory(Period.MIN15, this.startOfHistory);
+        }
+
         var currentBarTime = this.Time();
 
         var inLondonSession = this.londonSession.ContainsDate(currentBarTime);
@@ -523,24 +526,11 @@ public class IndicatorCountryOHLC1 : Indicator
             this.asiaRange.EndDateTime = currentBarTime;
         }
 
-
-        //if (Core.TimeUtils.DateTimeUtcNow.Subtract(this.lastGetHistory).Minutes >= 1)
-        //{
-        //    this.lastGetHistory = Core.TimeUtils.DateTimeUtcNow;
-        //    this.mainHistoricalData = this.Symbol.GetHistory(Period.MIN15, HistoryType.Bid, this.lastGetHistory.AddHours(-1));
-        //    this.mainHistoricalData.AddIndicator(this.mainIndicator);
-        //}
-
-        //if (this.PreviousDataOffset >= 0 && this.mainHistoricalData.Count > 0)
+        // ====================== telegram alert ========================
         if (this.PreviousDataOffset >= 0)
         {
-            //double currentClose = this.mainHistoricalData.Close(0);
-            //DateTime currentCloseTime = this.mainHistoricalData.Time(0);
-            double currentClose = this.HistoricalData.Close(0);
-            DateTime currentCloseTime = this.HistoricalData.Time(0);
-
-            if (this.AlertOnce == 1 && Core.TimeUtils.DateTimeUtcNow.Subtract(currentCloseTime).Seconds > 10)
-                return;
+            double currentClose = this.mainHistoricalData.Close(0);
+            DateTime currentCloseTime = this.mainHistoricalData.Time(0);
 
             CountryRangeItem range = new CountryRangeItem(currentCloseTime, currentClose);
             string currentSessionString = "", previousSessionString = "";
@@ -572,22 +562,30 @@ public class IndicatorCountryOHLC1 : Indicator
                 previousSessionString = "Asia";
             }
             else
-                return;
-
-            string highAlertId = $"{currentCloseTime.ToString()}_{range.StartDateTime}_{currentSessionString}_{previousSessionString}_high";
-            string lowAlertId = $"{currentCloseTime.ToString()}_{range.StartDateTime}_{currentSessionString}_{previousSessionString}_low";
-
-            string lastAlertId = sentAlerts.LastOrDefault("");
-
-            if (!sentAlerts.Contains(highAlertId) && currentClose > range.High && (this.AlertOnce == 0 || compareTwoAlerts(highAlertId, lastAlertId)))
             {
-                SendTelegramAlert($"{currentSessionString} session closed ABOVE previous {previousSessionString} session HIGH ({range.High}) on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)}", highAlertId);
-                //sentAlerts.Add(highAlertId);
+                if (this.londonRangeCache.Count > this.PreviousDataOffset)
+                    range = this.londonRangeCache[this.PreviousDataOffset];
+                else
+                    return;
+                previousSessionString = "London";
             }
-            if (!sentAlerts.Contains(lowAlertId) && currentClose < range.Low && (this.AlertOnce == 0 || compareTwoAlerts(lowAlertId, lastAlertId)))
+
+            string highAlertId = $"{currentCloseTime.Date}_{range.StartDateTime.Date}_{currentSessionString}_{previousSessionString}_high";
+            string lowAlertId = $"{currentCloseTime.Date}_{range.StartDateTime.Date}_{currentSessionString}_{previousSessionString}_low";
+
+            string lastAlertId = sentAlerts.LastOrDefault();
+
+            //SendTelegramAlert($"current session: {currentSessionString}, previous session: {previousSessionString}, range HIGH ({range.High}), range LOW ({range.Low}) on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)}", "1");
+
+            if (!sentAlerts.Contains(highAlertId) && currentClose > range.High && (!this.AlertOnce || compareTwoAlerts(highAlertId, lastAlertId)))
             {
-                SendTelegramAlert($"{currentSessionString} session closed BELOW previous {previousSessionString} session LOW ({range.Low}) on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)}", lowAlertId);
-                //sentAlerts.Add(lowAlertId);
+                SendTelegramAlert($"{currentSessionString} closed ABOVE previous {previousSessionString} session HIGH ({range.High}) on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)}", highAlertId);
+                sentAlerts.Add(highAlertId);
+            }
+            if (!sentAlerts.Contains(lowAlertId) && currentClose < range.Low && (!this.AlertOnce || compareTwoAlerts(lowAlertId, lastAlertId)))
+            {
+                SendTelegramAlert($"{currentSessionString} closed BELOW previous {previousSessionString} session LOW ({range.Low}) on {TimeZoneInfo.ConvertTimeFromUtc(currentCloseTime, TimeZoneInfo.Local)}", lowAlertId);
+                sentAlerts.Add(lowAlertId);
             }
         }
         // ====================== telegram alert ========================
@@ -614,10 +612,6 @@ public class IndicatorCountryOHLC1 : Indicator
         this.asiaSessionCloseDateTime = default;
 
         this.asiaRangeCache?.Clear();
-
-        this.mainHistoricalData?.Dispose();
-
-        this.sentAlerts.Clear();
     }
 
     public override IList<SettingItem> Settings
@@ -626,8 +620,8 @@ public class IndicatorCountryOHLC1 : Indicator
         {
             var settings = base.Settings;
 
-            var alertEverytime = new SelectItem("Every time", 0);
-            var alertOnce = new SelectItem("Only Once", 1);
+            var alertOnce = new SelectItem("Only Once", true);
+            var alertEverytime = new SelectItem("Every time", false);
 
             var belowTL = new SelectItem("Below the line", 0);
             var aboveTL = new SelectItem("Above the line", 1);
@@ -661,8 +655,8 @@ public class IndicatorCountryOHLC1 : Indicator
             });
             settings.Add(new SettingItemSelectorLocalized("Send Alerts", new SelectItem("Send Alerts", this.AlertOnce), new List<SelectItem>
                              {
-                                 alertEverytime,
-                                 alertOnce
+                                 alertOnce,
+                                 alertEverytime
                              })
             {
                 SeparatorGroup = defaultSeparator,
@@ -965,8 +959,8 @@ public class IndicatorCountryOHLC1 : Indicator
             if (value.TryGetValue("teleChatId", out string telegramChatId))
                 this.telegramChatId = telegramChatId;
 
-            if (holder.TryGetValue("Send Alerts", out var alitem) && alitem.GetValue<int>() != this.AlertOnce)
-                this.AlertOnce = alitem.GetValue<int>();
+            if (holder.TryGetValue("Send Alerts", out SettingItem item) && item.Value is bool alertonce)
+                this.AlertOnce = alertonce;
 
             //if (holder.TryGetValue("OpenLineOptions", out SettingItem item) && item.Value is LineOptions openOptions)
             //    this.OpenLineOptions = openOptions;
@@ -982,7 +976,7 @@ public class IndicatorCountryOHLC1 : Indicator
             //if (holder.TryGetValue("CloseCustomText", out item) && item.Value is string closeCustomText)
             //    this.CloseCustomText = closeCustomText;
 
-            if (holder.TryGetValue("AsiaHighLineOptions", out SettingItem item) && item.Value is LineOptions highAsiaOptions)
+            if (holder.TryGetValue("AsiaHighLineOptions", out item) && item.Value is LineOptions highAsiaOptions)
                 this.AsiaHighLineOptions = highAsiaOptions;
             if (holder.TryGetValue("ShowAsiaHighLineLabel", out item) && item.Value is bool showAsiaHighLabel)
                 this.ShowAsiaHighLineLabel = showAsiaHighLabel;
@@ -1599,6 +1593,7 @@ public class IndicatorCountryOHLC1 : Indicator
             return;
 
         string url = $"https://api.telegram.org/bot{telegramBotToken}/sendMessage";
+        string postData = $"chat_id={telegramChatId}&text={Uri.EscapeDataString(message)}";
 
         try
         {
@@ -1627,13 +1622,12 @@ public class IndicatorCountryOHLC1 : Indicator
     {
         // false if same, otherwise true -> true means available sending alerts
 
-        if (first == "" || second == "")
+        if (first.Length == 0 || second.Length == 0)
             return true;
-
         var firstVals = first.Split('_');
         var secondVals = second.Split('_');
 
-        int i = 2;
+        int i = 0;
         for (i = 2; i < 5; i++)
             if (firstVals[i] != secondVals[i])
                 break;
@@ -1643,7 +1637,7 @@ public class IndicatorCountryOHLC1 : Indicator
 
     #region Nested
 
-    class CountryRangeItem
+    internal class CountryRangeItem
     {
         public double High { get; private set; }
         public double Low { get; private set; }
